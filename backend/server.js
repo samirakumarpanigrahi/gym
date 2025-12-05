@@ -246,6 +246,177 @@ app.post('/api/workouts/:id/publish', requireAuth(pool), async (req, res) => {
   }
 });
 
+/* B3_PATCH_MARKER */
+/* Advanced publish (publish-metrics): computes total weight & distance and updates challenge progress */
+app.post('/api/workouts/:id/publish-metrics', requireAuth(pool), async (req, res) => {
+  const workoutId = req.params.id;
+  const { caption } = req.body || {};
+  const userId = req.user && req.user.id;
+  const client = await pool.connect();
+  try {
+    const postId = require('uuid').v4();
+    await client.query(
+      `INSERT INTO posts (id, author_id, type, linked_workout_id, caption, visibility_status, created_at)
+       VALUES ($1,$2,'workout',$3,$4,'visible', now())`,
+       [postId, userId, workoutId, caption || null]
+    );
+
+    // compute total weight lifted: sum(reps * weight) across all sets of this workout
+    const weightRes = await client.query(`
+      SELECT s.reps, s.weight FROM sets s
+      JOIN workout_exercises we ON we.id = s.workout_exercise_id
+      WHERE we.workout_id = $1
+    `, [workoutId]);
+    let totalWeight = 0;
+    for (let r of weightRes.rows || []) {
+      const reps = Number(r.reps || 0);
+      const weight = Number(r.weight || 0);
+      totalWeight += reps * weight;
+    }
+
+    // read workout distance (assumes workouts.distance exists)
+    const dres = await client.query('SELECT distance FROM workouts WHERE id = $1 LIMIT 1', [workoutId]);
+    const distance = dres.rowCount ? Number(dres.rows[0].distance || 0) : 0;
+
+    // update participants progress for active challenges the user is in
+    const challengeRows = await client.query(
+      `SELECT c.id, c.goal_type FROM challenges c
+       JOIN challenge_participants cp ON cp.challenge_id = c.id
+       WHERE cp.user_id = $1 AND c.start_date <= now() AND c.end_date >= now()`,
+      [userId]
+    );
+
+    for (let ch of challengeRows.rows || []) {
+      if (ch.goal_type === 'workouts_count') {
+        await client.query(`UPDATE challenge_participants SET progress_value = progress_value + 1 WHERE challenge_id = $1 AND user_id = $2`, [ch.id, userId]);
+      } else if (ch.goal_type === 'weight_lifted') {
+        if (totalWeight > 0) {
+          await client.query(`UPDATE challenge_participants SET progress_value = progress_value + $1 WHERE challenge_id = $2 AND user_id = $3`, [totalWeight, ch.id, userId]);
+        }
+      } else if (ch.goal_type === 'distance') {
+        if (distance > 0) {
+          await client.query(`UPDATE challenge_participants SET progress_value = progress_value + $1 WHERE challenge_id = $2 AND user_id = $3`, [distance, ch.id, userId]);
+        }
+      }
+    }
+
+    res.json({ id: postId, totalWeight, distance });
+  } catch (e) {
+    console.error('publish-metrics failed', e);
+    res.status(500).json({ error: 'publish_metrics_failed', message: String(e) });
+  } finally {
+    client.release();
+  }
+});
+
+/* Challenge summary endpoint: top participants, your progress, percent complete */
+app.get('/api/challenges/:id/summary', requireAuth(pool), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const cid = req.params.id;
+    const r = await client.query('SELECT id, title, description, start_date, end_date, goal_type, goal_value FROM challenges WHERE id = $1 LIMIT 1', [cid]);
+    if (r.rowCount === 0) return res.status(404).json({ error: 'not_found' });
+    const challenge = r.rows[0];
+    const top = await client.query('SELECT cp.user_id, cp.progress_value, u.username, u.display_name, u.avatar_url FROM challenge_participants cp JOIN users u ON u.id = cp.user_id WHERE cp.challenge_id = $1 ORDER BY cp.progress_value DESC LIMIT 10', [cid]);
+    const mine = await client.query('SELECT progress_value FROM challenge_participants WHERE challenge_id = $1 AND user_id = $2 LIMIT 1', [cid, req.user.id]);
+    const myProgress = mine.rowCount ? Number(mine.rows[0].progress_value) : 0;
+    let percent = null;
+    if (Number(challenge.goal_value) > 0) percent = Math.min(100, Math.round((myProgress / Number(challenge.goal_value)) * 100));
+    res.json({ challenge, top: top.rows, myProgress, percent });
+  } catch (e) {
+    console.error('challenge summary failed', e);
+    res.status(500).json({ error: 'summary_failed' });
+  } finally {
+    client.release();
+  }
+});
+/* B3_PATCH_MARKER */
+/* Advanced publish (publish-metrics): computes total weight & distance and updates challenge progress */
+app.post('/api/workouts/:id/publish-metrics', requireAuth(pool), async (req, res) => {
+  const workoutId = req.params.id;
+  const { caption } = req.body || {};
+  const userId = req.user && req.user.id;
+  const client = await pool.connect();
+  try {
+    const postId = require('uuid').v4();
+    await client.query(
+      `INSERT INTO posts (id, author_id, type, linked_workout_id, caption, visibility_status, created_at)
+       VALUES ($1,$2,'workout',$3,$4,'visible', now())`,
+       [postId, userId, workoutId, caption || null]
+    );
+
+    // compute total weight lifted: sum(reps * weight) across all sets of this workout
+    const weightRes = await client.query(`
+      SELECT s.reps, s.weight FROM sets s
+      JOIN workout_exercises we ON we.id = s.workout_exercise_id
+      WHERE we.workout_id = $1
+    `, [workoutId]);
+    let totalWeight = 0;
+    for (let r of weightRes.rows || []) {
+      const reps = Number(r.reps || 0);
+      const weight = Number(r.weight || 0);
+      totalWeight += reps * weight;
+    }
+
+    // read workout distance (assumes workouts.distance exists)
+    const dres = await client.query('SELECT distance FROM workouts WHERE id = $1 LIMIT 1', [workoutId]);
+    const distance = dres.rowCount ? Number(dres.rows[0].distance || 0) : 0;
+
+    // update participants progress for active challenges the user is in
+    const challengeRows = await client.query(
+      `SELECT c.id, c.goal_type FROM challenges c
+       JOIN challenge_participants cp ON cp.challenge_id = c.id
+       WHERE cp.user_id = $1 AND c.start_date <= now() AND c.end_date >= now()`,
+      [userId]
+    );
+
+    for (let ch of challengeRows.rows || []) {
+      if (ch.goal_type === 'workouts_count') {
+        await client.query(`UPDATE challenge_participants SET progress_value = progress_value + 1 WHERE challenge_id = $1 AND user_id = $2`, [ch.id, userId]);
+      } else if (ch.goal_type === 'weight_lifted') {
+        if (totalWeight > 0) {
+          await client.query(`UPDATE challenge_participants SET progress_value = progress_value + $1 WHERE challenge_id = $2 AND user_id = $3`, [totalWeight, ch.id, userId]);
+        }
+      } else if (ch.goal_type === 'distance') {
+        if (distance > 0) {
+          await client.query(`UPDATE challenge_participants SET progress_value = progress_value + $1 WHERE challenge_id = $2 AND user_id = $3`, [distance, ch.id, userId]);
+        }
+      }
+    }
+
+    res.json({ id: postId, totalWeight, distance });
+  } catch (e) {
+    console.error('publish-metrics failed', e);
+    res.status(500).json({ error: 'publish_metrics_failed', message: String(e) });
+  } finally {
+    client.release();
+  }
+});
+
+/* Challenge summary endpoint: top participants, your progress, percent complete */
+app.get('/api/challenges/:id/summary', requireAuth(pool), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const cid = req.params.id;
+    const r = await client.query('SELECT id, title, description, start_date, end_date, goal_type, goal_value FROM challenges WHERE id = $1 LIMIT 1', [cid]);
+    if (r.rowCount === 0) return res.status(404).json({ error: 'not_found' });
+    const challenge = r.rows[0];
+    const top = await client.query('SELECT cp.user_id, cp.progress_value, u.username, u.display_name, u.avatar_url FROM challenge_participants cp JOIN users u ON u.id = cp.user_id WHERE cp.challenge_id = $1 ORDER BY cp.progress_value DESC LIMIT 10', [cid]);
+    const mine = await client.query('SELECT progress_value FROM challenge_participants WHERE challenge_id = $1 AND user_id = $2 LIMIT 1', [cid, req.user.id]);
+    const myProgress = mine.rowCount ? Number(mine.rows[0].progress_value) : 0;
+    let percent = null;
+    if (Number(challenge.goal_value) > 0) percent = Math.min(100, Math.round((myProgress / Number(challenge.goal_value)) * 100));
+    res.json({ challenge, top: top.rows, myProgress, percent });
+  } catch (e) {
+    console.error('challenge summary failed', e);
+    res.status(500).json({ error: 'summary_failed' });
+  } finally {
+    client.release();
+  }
+});
+/* END B3_PATCH_MARKER */
+
+
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, ()=> console.log('Server running on port', PORT));
 

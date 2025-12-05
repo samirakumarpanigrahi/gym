@@ -166,3 +166,6 @@ export async function apiGetNotifications() {
 export async function apiMarkNotificationRead(id) {
   return request(`/api/notifications/${id}/read`, { method: 'POST' });
 }
+export function apiGetChallengeSummary(id){ return request(`/api/challenges/${id}/summary`); }
+export function apiPublishWorkoutWithMetrics(id, caption){ return request(`/api/workouts/${id}/publish-metrics`, { method: 'POST', body: JSON.stringify({ caption }) }); }
+export function apiGetChallengeWorkouts(id){ return request(`/api/challenges/${id}/workouts`); }
